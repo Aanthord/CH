@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Density Generator Tester — Single‑File Demo</title>
+  <meta name="description" content="Mathematical structure density analysis — F_i/G_i convergence testing" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
+    .card { border: 1px solid rgba(0,0,0,.08); border-radius: 16px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .mono { font-family: ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
+    .chart-container { background: #fafafa; border: 1px solid #e5e7eb; border-radius: 8px; }
+  </style>
+</head>
+<body class="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100">
+  <main class="max-w-6xl mx-auto p-6">
+    <h1 class="text-3xl font-bold text-center mb-2 text-gray-800">Density Generator Tester</h1>
+    <p class="text-center text-neutral-600 mb-6">Mathematical Structure Analysis · F<sub>i</sub>/G<sub>i</sub> Convergence · Single‑file</p>
+
+    <!-- Controls -->
+    <div class="card p-6 mb-6">
+      <h2 class="text-xl font-semibold mb-4">Analysis Controls</h2>
+      <div class="grid md:grid-cols-3 gap-4 mb-4">
+        <div>
+          <label class="block text-sm font-medium mb-2">Generator Type:</label>
+          <select id="generatorSelect" class="w-full p-2 border rounded-lg bg-white">
+            <option value="naturals">Naturals (ℕ) proxy: F_i = i, G_i = i²</option>
+            <option value="reals">Binary strings (ℝ proxy): F_i = 2^i, G_i = 2^i</option>
+            <option value="bernoulli">Bernoulli retention: F_i = p·2^i, G_i = 2^i</option>
+            <option value="powerlaw">Power-law decay: F_i = i^1.5, G_i = 2^i</option>
+            <option value="fibonacci">Fibonacci growth: F_i = fib(i), G_i = 2^i</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-2">Max Depth:</label>
+          <input type="number" id="maxDepth" min="5" max="25" value="15" class="w-full p-2 border rounded-lg">
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-2">Parameter (p for Bernoulli):</label>
+          <input type="number" id="parameter" min="0.01" max="0.99" step="0.01" value="0.37" class="w-full p-2 border rounded-lg">
+        </div>
+      </div>
+      <div class="flex gap-3">
+        <button id="runBtn" class="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">Run Analysis</button>
+        <button id="copyBtn" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Copy Results</button>
+        <button id="downloadBtn" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">Download CSV</button>
+      </div>
+    </div>
+
+    <!-- Chart -->
+    <div id="chartContainer" class="card p-6 mb-6" style="display: none;">
+      <h2 class="text-xl font-semibold mb-4">Density Sequence Visualization</h2>
+      <div class="chart-container p-4">
+        <svg id="chart" width="100%" height="300" viewBox="0 0 800 300"></svg>
+      </div>
+    </div>
+
+    <!-- Results -->
+    <div id="resultsContainer" class="card p-6" style="display: none;">
+      <h2 class="text-xl font-semibold mb-4">Analysis Results</h2>
+      <pre id="results" class="mono whitespace-pre-wrap text-sm bg-gray-50 p-4 rounded border max-h-64 overflow-auto"></pre>
+    </div>
+
+    <footer class="mt-10 text-center text-xs text-neutral-500">
+      Built savage‑style: one <code class="mono">index.html</code> with vanilla JavaScript + SVG charts.
+    </footer>
+  </main>
+
+  <script>
+    class Generator {
+      constructor(name, F, G) { this.name = name; this.F = F; this.G = G; }
+
+      densityAt(i) {
+        try {
+          const f = this.F(i);
+          const g = this.G(i);
+          if (g === 0 || !isFinite(f) || !isFinite(g)) return 0;
+          return f / g;
+        } catch { return 0; }
+      }
+
+      densitySequence(depths) {
+        return depths.map(i => ({ depth: i, density: this.densityAt(i) }))
+                     .filter(d => isFinite(d.density) && d.density >= 0);
+      }
+    }
+
+    // --- FIX: remove 2^i caps; keep everything exact for i ≤ 25 ---
+    function createGenerators(p = 0.37) {
+      return {
+        naturals: new Generator(
+          "Naturals (ℕ) proxy",
+          i => i,
+          i => i > 0 ? i * i : 1
+        ),
+        reals: new Generator(
+          "Binary strings (ℝ proxy)",
+          i => Math.pow(2, i),
+          i => Math.pow(2, i)
+        ),
+        bernoulli: new Generator(
+          `Bernoulli retention (p=${p})`,
+          i => p * Math.pow(2, i),
+          i => Math.pow(2, i)
+        ),
+        powerlaw: new Generator(
+          "Power-law decay",
+          i => Math.pow(i, 1.5),
+          i => Math.pow(2, i)
+        ),
+        fibonacci: new Generator(
+          "Fibonacci growth",
+          i => {
+            if (i <= 1) return 1;
+            let a = 1, b = 1;
+            for (let j = 2; j <= i; j++) [a, b] = [b, a + b];
+            return b;
+          },
+          i => Math.pow(2, i)
+        )
+      };
+    }
+
+    function estimateLimit(generator, maxDepth) {
+      const vals = [];
+      for (let i = 1; i <= maxDepth; i++) {
+        const density = generator.densityAt(i);
+        if (isFinite(density)) vals.push(density);
+      }
+      if (vals.length === 0) return 0;
+      const q = Math.max(1, Math.floor(vals.length / 4));
+      const tail = vals.slice(-q);
+      return tail.reduce((a, b) => a + b, 0) / tail.length;
+    }
+
+    function drawChart(data, title) {
+      const svg = document.getElementById('chart');
+      const width = 800, height = 300;
+      const margin = { top: 20, right: 40, bottom: 50, left: 60 };
+      const innerWidth = width - margin.left - margin.right;
+      const innerHeight = height - margin.top - margin.bottom;
+      svg.innerHTML = '';
+      if (!data || data.length === 0) return;
+
+      const depths = data.map(d => d.depth);
+      const densities = data.map(d => d.density);
+      const xMin = Math.min(...depths), xMax = Math.max(...depths);
+      const yMin = Math.min(...densities), yMax = Math.max(...densities);
+
+      const yPadding = (yMax - yMin) * 0.1 || 0.1;
+      const yMinPadded = Math.max(0, yMin - yPadding);
+      const yMaxPadded = Math.max(yMinPadded + 0.1, yMax + yPadding); // avoid flat axis
+
+      const xScale = x => margin.left + ((x - xMin) / (xMax - xMin || 1)) * innerWidth;
+      const yScale = y => margin.top + innerHeight - ((y - yMinPadded) / (yMaxPadded - yMinPadded || 1)) * innerHeight;
+
+      const ns = 'http://www.w3.org/2000/svg';
+      const rect = (attrs) => { const el = document.createElementNS(ns, 'rect'); Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v)); return el; };
+      const line = (attrs) => { const el = document.createElementNS(ns, 'line'); Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v)); return el; };
+      const text = (attrs, content) => { const el = document.createElementNS(ns, 'text'); Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v)); el.textContent = content; return el; };
+      const pathEl = (attrs) => { const el = document.createElementNS(ns, 'path'); Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v)); return el; };
+      const circle = (attrs) => { const el = document.createElementNS(ns, 'circle'); Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v)); return el; };
+
+      svg.appendChild(rect({ width, height, fill: '#fafafa' }));
+      for (let i = 0; i <= 5; i++) {
+        const y = margin.top + (i / 5) * innerHeight;
+        svg.appendChild(line({ x1: margin.left, x2: width - margin.right, y1: y, y2: y, stroke: '#e5e7eb', 'stroke-dasharray': '2,2' }));
+      }
+      svg.appendChild(line({ x1: margin.left, x2: width - margin.right, y1: height - margin.bottom, y2: height - margin.bottom, stroke: '#374151', 'stroke-width': '2' }));
+      svg.appendChild(line({ x1: margin.left, x2: margin.left, y1: margin.top, y2: height - margin.bottom, stroke: '#374151', 'stroke-width': '2' }));
+
+      const dStr = data.map((d,i)=>`${i?'L':'M'}${xScale(d.depth)},${yScale(d.density)}`).join(' ');
+      svg.appendChild(pathEl({ d: dStr, fill: 'none', stroke: '#3b82f6', 'stroke-width': '3' }));
+      data.forEach(d => svg.appendChild(circle({ cx: xScale(d.depth), cy: yScale(d.density), r: 4, fill: '#1d4ed8' })));
+
+      svg.appendChild(text({ x: width/2, y: height-10, 'text-anchor': 'middle', 'font-size': 14, fill: '#374151' }, 'Depth (i)'));
+      svg.appendChild(text({ x: 15, y: height/2, 'text-anchor': 'middle', 'font-size': 14, fill: '#374151', transform: `rotate(-90 15 ${height/2})` }, 'Density (F_i/G_i)'));
+
+      [xMin, Math.ceil((xMin + xMax)/2), xMax].forEach(val => {
+        svg.appendChild(text({ x: xScale(val), y: height - margin.bottom + 15, 'text-anchor': 'middle', 'font-size': 12, fill: '#6b7280' }, val));
+      });
+      [yMinPadded, (yMinPadded + yMaxPadded)/2, yMaxPadded].forEach(val => {
+        svg.appendChild(text({ x: margin.left - 10, y: yScale(val) + 4, 'text-anchor': 'end', 'font-size': 12, fill: '#6b7280' }, val.toFixed(3)));
+      });
+    }
+
+    let currentData = [];
+    let currentResults = '';
+
+    function runAnalysis() {
+      const generatorType = document.getElementById('generatorSelect').value;
+      const maxDepth = parseInt(document.getElementById('maxDepth').value) || 15;
+      const parameter = parseFloat(document.getElementById('parameter').value) || 0.37;
+
+      const generators = createGenerators(parameter);
+      const generator = generators[generatorType];
+
+      const depths = Array.from({ length: maxDepth }, (_, i) => i + 1);
+      const data = generator.densitySequence(depths);
+      currentData = data;
+
+      drawChart(data, generator.name);
+      document.getElementById('chartContainer').style.display = 'block';
+
+      const limit = estimateLimit(generator, maxDepth);
+
+      let analysisText = `DENSITY ANALYSIS RESULTS\n`;
+      analysisText += `========================\n\n`;
+      analysisText += `Generator: ${generator.name}\n`;
+      analysisText += `Max Depth: ${maxDepth}\n`;
+      analysisText += `Parameter: ${parameter}\n`;
+      analysisText += `Estimated Limit: ${limit.toFixed(6)}\n\n`;
+
+      analysisText += `SEQUENCE VALUES:\n`;
+      data.slice(0, 12).forEach(({depth, density}) => {
+        analysisText += `  D(${depth.toString().padStart(2)}) = ${density.toFixed(6)}\n`;
+      });
+      if (data.length > 12) analysisText += `  ... (${data.length - 12} more values)\n`;
+
+      analysisText += `\nFALSIFIABILITY TESTS:\n`;
+      analysisText += `====================\n`;
+
+      if (generatorType === 'naturals') {
+        const test = limit < 0.1;
+        analysisText += `✓ Should converge to 0: ${test ? 'PASS' : 'FAIL'} (limit = ${limit.toFixed(6)})\n`;
+        analysisText += `  Expected: approaches 0 as i → ∞ since F_i/G_i = i/i² = 1/i\n`;
+      } else if (generatorType === 'reals') {
+        const test = Math.abs(limit - 1.0) < 1e-12;
+        analysisText += `✓ Should equal 1: ${test ? 'PASS' : 'FAIL'} (limit = ${limit.toFixed(6)})\n`;
+        analysisText += `  Expected: exactly 1 since F_i/G_i = 2^i/2^i = 1\n`;
+      } else if (generatorType === 'bernoulli') {
+        const test = Math.abs(limit - parameter) < 1e-12;
+        analysisText += `✓ Should equal p=${parameter}: ${test ? 'PASS' : 'FAIL'} (limit = ${limit.toFixed(6)})\n`;
+        analysisText += `  Expected: exactly p since F_i/G_i = (p·2^i)/2^i = p\n`;
+      } else if (generatorType === 'powerlaw') {
+        const test = limit < 0.01;
+        analysisText += `✓ Should approach 0: ${test ? 'PASS' : 'FAIL'} (limit = ${limit.toFixed(6)})\n`;
+        analysisText += `  Expected: approaches 0 since F_i/G_i = i^{1.5}/2^i → 0\n`;
+      } else if (generatorType === 'fibonacci') {
+        const test = limit < 0.01;
+        analysisText += `✓ Should approach 0: ${test ? 'PASS' : 'FAIL'} (limit = ${limit.toFixed(6)})\n`;
+        analysisText += `  Expected: approaches 0 since Fibonacci grows sub‑exponentially vs 2^i\n`;
+      }
+
+      currentResults = analysisText;
+      document.getElementById('results').textContent = analysisText;
+      document.getElementById('resultsContainer').style.display = 'block';
+    }
+
+    function copyResults() {
+      navigator.clipboard.writeText(currentResults).catch(() => {
+        const textArea = document.createElement('textarea');
+        textArea.value = currentResults;
+        document.body.appendChild(textArea);
+        textArea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textArea);
+      });
+    }
+
+    function downloadCSV() {
+      if (currentData.length === 0) return;
+      const csvContent = 'depth,density\n' + currentData.map(d => `${d.depth},${d.density}`).join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'density_generator_results.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    document.getElementById('runBtn').addEventListener('click', runAnalysis);
+    document.getElementById('copyBtn').addEventListener('click', copyResults);
+    document.getElementById('downloadBtn').addEventListener('click', downloadCSV);
+
+    runAnalysis();
+  </script>
+</body>
+</html>
